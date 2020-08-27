@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/cli/cli/internal/ghinstance"
 	"github.com/cli/cli/internal/ghrepo"
@@ -76,9 +77,14 @@ type PullRequest struct {
 				StatusCheckRollup struct {
 					Contexts struct {
 						Nodes []struct {
-							State      string
-							Status     string
-							Conclusion string
+							Name        string
+							Context     string
+							State       string
+							Status      string
+							Conclusion  string
+							StartedAt   time.Time
+							CompletedAt time.Time
+							DetailsURL  string
 						}
 					}
 				}
@@ -273,9 +279,11 @@ func PullRequests(client *Client, repo ghrepo.Interface, currentPRNumber int, cu
 						contexts(last: 100) {
 							nodes {
 								...on StatusContext {
+									context
 									state
 								}
 								...on CheckRun {
+									name
 									status
 									conclusion
 								}
@@ -424,6 +432,24 @@ func PullRequestByNumber(client *Client, repo ghrepo.Interface, number int) (*Pu
 					nodes {
 						commit {
               oid
+						  statusCheckRollup {
+						    contexts(last: 100) {
+						      nodes {
+						  		  ...on StatusContext {
+						  			  context
+						  				state
+						  			}
+						  			...on CheckRun {
+											name
+											status
+											conclusion
+											startedAt
+											completedAt
+											detailsUrl
+						  			}
+						  		}
+						  	}
+						  }
             }
           }
 				}
@@ -535,6 +561,24 @@ func PullRequestForBranch(client *Client, repo ghrepo.Interface, baseBranch, hea
 					  nodes {
 						  commit {
 							  oid
+								statusCheckRollup {
+								  contexts(last: 100) {
+								    nodes {
+										  ...on StatusContext {
+											  context
+												state
+											}
+											...on CheckRun {
+												name
+												status
+												conclusion
+												startedAt
+												completedAt
+												detailsUrl
+											}
+										}
+									}
+								}
 							}
 					  }
 					}

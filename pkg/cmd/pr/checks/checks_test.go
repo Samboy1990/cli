@@ -80,6 +80,7 @@ func Test_checksRun_tty(t *testing.T) {
 		stubs   func(*httpmock.Registry)
 		wantOut string
 	}{
+		// TODO adapt this to accept either a stubs function _or_ a fixture file name.
 		{
 			name: "no commits",
 			stubs: func(reg *httpmock.Registry) {

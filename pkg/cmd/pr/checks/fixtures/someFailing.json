@@ -1,0 +1,24 @@
+{ "data": { "repository": { "pullRequest": { 
+  "number": 123, 
+  "commits": { 
+    "nodes": [
+      {
+        "commit": {
+          "oid": "abc",
+          "statusCheckRollup": {
+            "contexts": {
+              "nodes": [
+                {
+                  "state": "SUCCESS",
+                  "name": "cool tests",
+                  "startedAt": "TODO",
+                  "completedAt": "TODO",
+                  "detailsUrl": "sweet link"
+                } // TODO TODO TODO
+              ]
+            }
+          }
+        }
+      }
+    ]} 
+} } } }

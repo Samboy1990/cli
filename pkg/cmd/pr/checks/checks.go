@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -41,6 +42,10 @@ func NewCmdChecks(f *cmdutil.Factory, runF func(*ChecksOptions) error) *cobra.Co
 			// support `-R, --repo` override
 			opts.BaseRepo = f.BaseRepo
 
+			if repoOverride, _ := cmd.Flags().GetString("repo"); repoOverride != "" && len(args) == 0 {
+				return &cmdutil.FlagError{Err: errors.New("argument required when using the --repo flag")}
+			}
+
 			if len(args) > 0 {
 				opts.SelectorArg = args[0]
 			}
@@ -57,11 +62,6 @@ func NewCmdChecks(f *cmdutil.Factory, runF func(*ChecksOptions) error) *cobra.Co
 }
 
 func checksRun(opts *ChecksOptions) error {
-	repo, err := opts.BaseRepo()
-	if err != nil {
-		return err
-	}
-
 	httpClient, err := opts.HttpClient()
 	if err != nil {
 		return err
@@ -73,50 +73,89 @@ func checksRun(opts *ChecksOptions) error {
 		return err
 	}
 
-	runList, err := shared.CheckRuns(apiClient, repo, pr)
-	if err != nil {
-		return err
+	if len(pr.Commits.Nodes) == 0 {
+		return nil
 	}
 
-	if len(runList.CheckRuns) == 0 {
+	rollup := pr.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.Nodes
+	if len(rollup) == 0 {
 		return nil
 	}
 
 	tp := utils.NewTablePrinter(opts.IO)
 
-	for _, cr := range runList.CheckRuns {
-		var mark string
-		switch cr.Status {
-		case "pending":
-			mark = utils.YellowDash()
-		case "pass":
+	passing := 0
+	failing := 0
+	pending := 0
+
+	for _, c := range pr.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.Nodes {
+		mark := ""
+		bucket := ""
+		state := c.State
+		if state == "" {
+			if c.Status == "COMPLETED" {
+				state = c.Conclusion
+			} else {
+				state = c.Status
+			}
+		}
+		switch state {
+		case "SUCCESS", "NEUTRAL", "SKIPPED":
 			mark = utils.GreenCheck()
-		case "fail":
+			passing++
+			bucket = "pass"
+		case "ERROR", "FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED":
 			mark = utils.RedX()
+			failing++
+			bucket = "fail"
+		case "EXPECTED", "REQUESTED", "QUEUED", "PENDING", "IN_PROGRESS", "STALE":
+			mark = utils.YellowDash()
+			pending++
+			bucket = "pending"
+		default:
+			panic(fmt.Errorf("unsupported status: %q", state))
 		}
 
-		elapsed := cr.Elapsed.String()
-		if cr.Elapsed < 0 {
+		e := c.CompletedAt.Sub(c.StartedAt)
+		elapsed := e.String()
+		if e < 0 {
 			elapsed = "0"
 		}
 
 		if opts.IO.IsStdoutTTY() {
 			tp.AddField(mark, nil, nil)
-			tp.AddField(cr.Name, nil, nil)
+			tp.AddField(c.Name, nil, nil)
 			tp.AddField(elapsed, nil, nil)
-			tp.AddField(cr.Link, nil, nil)
+			tp.AddField(c.DetailsURL, nil, nil)
 		} else {
-			tp.AddField(cr.Name, nil, nil)
-			tp.AddField(cr.Status, nil, nil)
+			tp.AddField(c.Name, nil, nil)
+			tp.AddField(bucket, nil, nil)
 			tp.AddField(elapsed, nil, nil)
-			tp.AddField(cr.Link, nil, nil)
+			tp.AddField(c.DetailsURL, nil, nil)
 		}
 
 		tp.EndRow()
 	}
 
+	summary := ""
+	if failing+passing+pending > 0 {
+		if failing > 0 {
+			summary = "Some checks were not successful"
+		} else if pending > 0 {
+			summary = "Some checks are still pending"
+		} else {
+			summary = "All checks were successful"
+		}
+
+		tallies := fmt.Sprintf(
+			"%d failing, %d successful, and %d pending checks",
+			failing, passing, pending)
+
+		summary = fmt.Sprintf("%s\n%s", utils.Bold(summary), tallies)
+	}
+
 	if opts.IO.IsStdoutTTY() {
-		fmt.Fprintln(opts.IO.Out, runList.Summary())
+		fmt.Fprintln(opts.IO.Out, summary)
 		fmt.Fprintln(opts.IO.Out)
 	}
 
