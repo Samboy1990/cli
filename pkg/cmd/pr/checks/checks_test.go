@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmd/pr/shared"
 	"github.com/cli/cli/pkg/cmdutil"
 	"github.com/cli/cli/pkg/httpmock"
 	"github.com/cli/cli/pkg/iostreams"
@@ -73,132 +72,112 @@ func startedAt() time.Time {
 	return t
 }
 
-func Test_checksRun_tty(t *testing.T) {
+func Test_checksRun(t *testing.T) {
 	tests := []struct {
 		name    string
-		payload shared.CheckRunsPayload
+		fixture string
 		stubs   func(*httpmock.Registry)
 		wantOut string
+		nontty  bool
 	}{
-		// TODO adapt this to accept either a stubs function _or_ a fixture file name.
 		{
 			name: "no commits",
 			stubs: func(reg *httpmock.Registry) {
-				reg.StubResponse(200, bytes.NewBufferString(`
+				reg.Register(
+					httpmock.GraphQL(`query PullRequestByNumber\b`),
+					httpmock.JSONResponse(
+						bytes.NewBufferString(`
 					{ "data": { "repository": {
 						"pullRequest": { "number": 123 }
 					} } }
-				`))
+				`)))
 			},
 		},
 		{
 			name: "no checks",
-			payload: shared.CheckRunsPayload{
-				CheckRuns: []shared.CheckRunPayload{},
+			stubs: func(reg *httpmock.Registry) {
+				reg.StubResponse(200, bytes.NewBufferString(`
+				  { "data": { "repository": {
+				  	"pullRequest": { "number": 123, "commits": { "nodes": [{"commit": {"oid": "abc"}}]} }
+				  } } }
+				`))
 			},
 		},
 		{
-			name: "some failing",
-			payload: shared.CheckRunsPayload{
-				CheckRuns: []shared.CheckRunPayload{
-					{
-						Name:        "sad tests",
-						Status:      "completed",
-						Conclusion:  "failure",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "cool tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "slow tests",
-						Status:      "in_progress",
-						Conclusion:  "",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-				},
-			},
-			wantOut: "Some checks were not successful\n1 failing, 1 successful, and 1 pending checks\n\nX  sad tests   24h0m0s  sweet link\n✓  cool tests  24h0m0s  sweet link\n-  slow tests  24h0m0s  sweet link\n",
+			name:    "some failing",
+			fixture: "./fixtures/someFailing.json",
+			wantOut: "Some checks were not successful\n1 failing, 1 successful, and 1 pending checks\n\nX  sad tests   1m26s  sweet link\n✓  cool tests  1m26s  sweet link\n-  slow tests  1m26s  sweet link\n",
 		},
 		{
-			name: "some pending",
-			payload: shared.CheckRunsPayload{
-				CheckRuns: []shared.CheckRunPayload{
-					{
-						Name:        "rad tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "cool tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "slow tests",
-						Status:      "in_progress",
-						Conclusion:  "",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-				},
-			},
-			wantOut: "Some checks are still pending\n0 failing, 2 successful, and 1 pending checks\n\n✓  rad tests   24h0m0s  sweet link\n✓  cool tests  24h0m0s  sweet link\n-  slow tests  24h0m0s  sweet link\n",
+			name:    "some pending",
+			fixture: "./fixtures/somePending.json",
+			wantOut: "Some checks are still pending\n0 failing, 2 successful, and 1 pending checks\n\n✓  cool tests  1m26s  sweet link\n✓  rad tests   1m26s  sweet link\n-  slow tests  1m26s  sweet link\n",
 		},
 		{
-			name: "all passing",
-			payload: shared.CheckRunsPayload{
-				CheckRuns: []shared.CheckRunPayload{
-					{
-						Name:        "rad tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "cool tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "awesome tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-				},
+			name:    "all passing",
+			fixture: "./fixtures/allPassing.json",
+			wantOut: "All checks were successful\n0 failing, 3 successful, and 0 pending checks\n\n✓  awesome tests  1m26s  sweet link\n✓  cool tests     1m26s  sweet link\n✓  rad tests      1m26s  sweet link\n",
+		},
+		{
+			name:    "with statuses",
+			fixture: "./fixtures/withStatuses.json",
+			wantOut: "Some checks were not successful\n1 failing, 2 successful, and 0 pending checks\n\nX  a status           sweet link\n✓  cool tests  1m26s  sweet link\n✓  rad tests   1m26s  sweet link\n",
+		},
+		{
+			name:   "no commits",
+			nontty: true,
+			stubs: func(reg *httpmock.Registry) {
+				reg.Register(
+					httpmock.GraphQL(`query PullRequestByNumber\b`),
+					httpmock.JSONResponse(
+						bytes.NewBufferString(`
+					{ "data": { "repository": {
+						"pullRequest": { "number": 123 }
+					} } }
+				`)))
 			},
-			wantOut: "All checks were successful\n0 failing, 3 successful, and 0 pending checks\n\n✓  rad tests      24h0m0s  sweet link\n✓  cool tests     24h0m0s  sweet link\n✓  awesome tests  24h0m0s  sweet link\n",
+		},
+		{
+			name:   "no checks",
+			nontty: true,
+			stubs: func(reg *httpmock.Registry) {
+				reg.StubResponse(200, bytes.NewBufferString(`
+				  { "data": { "repository": {
+						"pullRequest": { "number": 123, "commits": { "nodes": [{"commit": {"oid": "abc"}}]} }
+				  } } }
+				`))
+			},
+		},
+		{
+			name:    "some failing",
+			nontty:  true,
+			fixture: "./fixtures/someFailing.json",
+			wantOut: "sad tests\tfail\t1m26s\tsweet link\ncool tests\tpass\t1m26s\tsweet link\nslow tests\tpending\t1m26s\tsweet link\n",
+		},
+		{
+			name:    "some pending",
+			nontty:  true,
+			fixture: "./fixtures/somePending.json",
+			wantOut: "cool tests\tpass\t1m26s\tsweet link\nrad tests\tpass\t1m26s\tsweet link\nslow tests\tpending\t1m26s\tsweet link\n",
+		},
+		{
+			name:    "all passing",
+			nontty:  true,
+			fixture: "./fixtures/allPassing.json",
+			wantOut: "awesome tests\tpass\t1m26s\tsweet link\ncool tests\tpass\t1m26s\tsweet link\nrad tests\tpass\t1m26s\tsweet link\n",
+		},
+		{
+			name:    "with statuses",
+			nontty:  true,
+			fixture: "./fixtures/withStatuses.json",
+			wantOut: "a status\tfail\t0\tsweet link\ncool tests\tpass\t1m26s\tsweet link\nrad tests\tpass\t1m26s\tsweet link\n",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			io, _, stdout, _ := iostreams.Test()
-			io.SetStdoutTTY(true)
+			io.SetStdoutTTY(!tt.nontty)
 
 			opts := &ChecksOptions{
 				IO: io,
@@ -211,15 +190,12 @@ func Test_checksRun_tty(t *testing.T) {
 			reg := &httpmock.Registry{}
 			if tt.stubs != nil {
 				tt.stubs(reg)
+			} else if tt.fixture != "" {
+				reg.Register(
+					httpmock.GraphQL(`query PullRequestByNumber\b`), httpmock.FileResponse(tt.fixture))
 			} else {
-				reg.StubResponse(200, bytes.NewBufferString(`
-				{ "data": { "repository": {
-					"pullRequest": { "number": 123, "commits": { "nodes": [{"commit": {"oid": "abc"}}]} }
-				} } }
-			`))
+				panic("need either stubs or fixture key")
 			}
-			reg.Register(httpmock.REST("GET", "repos/OWNER/REPO/commits/abc/check-runs"),
-				httpmock.JSONResponse(tt.payload))
 
 			opts.HttpClient = func() (*http.Client, error) {
 				return &http.Client{Transport: reg}, nil
@@ -229,166 +205,7 @@ func Test_checksRun_tty(t *testing.T) {
 			assert.NoError(t, err)
 
 			assert.Equal(t, tt.wantOut, stdout.String())
-		})
-	}
-}
-
-func Test_checksRun_nontty(t *testing.T) {
-	tests := []struct {
-		name    string
-		payload shared.CheckRunsPayload
-		stubs   func(*httpmock.Registry)
-		wantOut string
-	}{
-		{
-			name: "no commits",
-			stubs: func(reg *httpmock.Registry) {
-				reg.StubResponse(200, bytes.NewBufferString(`
-					{ "data": { "repository": {
-						"pullRequest": { "number": 123 }
-					} } }
-				`))
-			},
-		},
-		{
-			name: "no checks",
-			payload: shared.CheckRunsPayload{
-				CheckRuns: []shared.CheckRunPayload{},
-			},
-		},
-		{
-			name: "some failing",
-			payload: shared.CheckRunsPayload{
-				CheckRuns: []shared.CheckRunPayload{
-					{
-						Name:        "sad tests",
-						Status:      "completed",
-						Conclusion:  "failure",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "cool tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "slow tests",
-						Status:      "in_progress",
-						Conclusion:  "",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-				},
-			},
-			wantOut: "sad tests\tfail\t24h0m0s\tsweet link\ncool tests\tpass\t24h0m0s\tsweet link\nslow tests\tpending\t24h0m0s\tsweet link\n",
-		},
-		{
-			name: "some pending",
-			payload: shared.CheckRunsPayload{
-				CheckRuns: []shared.CheckRunPayload{
-					{
-						Name:        "rad tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "cool tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "slow tests",
-						Status:      "in_progress",
-						Conclusion:  "",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-				},
-			},
-			wantOut: "rad tests\tpass\t24h0m0s\tsweet link\ncool tests\tpass\t24h0m0s\tsweet link\nslow tests\tpending\t24h0m0s\tsweet link\n",
-		},
-		{
-			name: "all passing",
-			payload: shared.CheckRunsPayload{
-				CheckRuns: []shared.CheckRunPayload{
-					{
-						Name:        "rad tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "cool tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-					{
-						Name:        "awesome tests",
-						Status:      "completed",
-						Conclusion:  "success",
-						StartedAt:   startedAt(),
-						CompletedAt: completedAt(),
-						HtmlUrl:     "sweet link",
-					},
-				},
-			},
-			wantOut: "rad tests\tpass\t24h0m0s\tsweet link\ncool tests\tpass\t24h0m0s\tsweet link\nawesome tests\tpass\t24h0m0s\tsweet link\n",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			io, _, stdout, _ := iostreams.Test()
-			io.SetStdoutTTY(false)
-
-			opts := &ChecksOptions{
-				IO: io,
-				BaseRepo: func() (ghrepo.Interface, error) {
-					return ghrepo.New("OWNER", "REPO"), nil
-				},
-				SelectorArg: "123",
-			}
-
-			reg := &httpmock.Registry{}
-			if tt.stubs != nil {
-				tt.stubs(reg)
-			} else {
-				reg.StubResponse(200, bytes.NewBufferString(`
-				{ "data": { "repository": {
-					"pullRequest": { "number": 123, "commits": { "nodes": [{"commit": {"oid": "abc"}}]} }
-				} } }
-			`))
-			}
-			reg.Register(httpmock.REST("GET", "repos/OWNER/REPO/commits/abc/check-runs"),
-				httpmock.JSONResponse(tt.payload))
-
-			opts.HttpClient = func() (*http.Client, error) {
-				return &http.Client{Transport: reg}, nil
-			}
-
-			err := checksRun(opts)
-			assert.NoError(t, err)
-
-			assert.Equal(t, tt.wantOut, stdout.String())
-
+			reg.Verify(t)
 		})
 	}
 }

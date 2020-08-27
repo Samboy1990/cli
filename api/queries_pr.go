@@ -85,6 +85,7 @@ type PullRequest struct {
 							StartedAt   time.Time
 							CompletedAt time.Time
 							DetailsURL  string
+							TargetURL   string
 						}
 					}
 				}
@@ -438,6 +439,7 @@ func PullRequestByNumber(client *Client, repo ghrepo.Interface, number int) (*Pu
 						  		  ...on StatusContext {
 						  			  context
 						  				state
+											targetUrl
 						  			}
 						  			...on CheckRun {
 											name
@@ -567,6 +569,7 @@ func PullRequestForBranch(client *Client, repo ghrepo.Interface, baseBranch, hea
 										  ...on StatusContext {
 											  context
 												state
+											  targetUrl
 											}
 											...on CheckRun {
 												name

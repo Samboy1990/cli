@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/cli/cli/api"
 	"github.com/cli/cli/context"
@@ -125,13 +126,27 @@ func checksRun(opts *ChecksOptions) error {
 			panic(fmt.Errorf("unsupported status: %q", state))
 		}
 
-		e := c.CompletedAt.Sub(c.StartedAt)
-		elapsed := e.String()
-		if e < 0 {
-			elapsed = "0s"
+		elapsed := ""
+		zeroTime := time.Time{}
+
+		if c.StartedAt != zeroTime && c.CompletedAt != zeroTime {
+			e := c.CompletedAt.Sub(c.StartedAt)
+			if e > 0 {
+				elapsed = e.String()
+			}
 		}
 
-		outputs = append(outputs, output{mark, bucket, c.Name, elapsed, c.DetailsURL})
+		link := c.DetailsURL
+		if link == "" {
+			link = c.TargetURL
+		}
+
+		name := c.Name
+		if name == "" {
+			name = c.Context
+		}
+
+		outputs = append(outputs, output{mark, bucket, name, elapsed, link})
 	}
 
 	sort.Slice(outputs, func(i, j int) bool {
@@ -159,7 +174,11 @@ func checksRun(opts *ChecksOptions) error {
 		} else {
 			tp.AddField(o.name, nil, nil)
 			tp.AddField(o.bucket, nil, nil)
-			tp.AddField(o.elapsed, nil, nil)
+			if o.elapsed == "" {
+				tp.AddField("0", nil, nil)
+			} else {
+				tp.AddField(o.elapsed, nil, nil)
+			}
 			tp.AddField(o.link, nil, nil)
 		}
 
