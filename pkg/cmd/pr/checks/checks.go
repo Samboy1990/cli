@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 
 	"github.com/cli/cli/api"
 	"github.com/cli/cli/context"
@@ -82,11 +83,19 @@ func checksRun(opts *ChecksOptions) error {
 		return nil
 	}
 
-	tp := utils.NewTablePrinter(opts.IO)
-
 	passing := 0
 	failing := 0
 	pending := 0
+
+	type output struct {
+		mark    string
+		bucket  string
+		name    string
+		elapsed string
+		link    string
+	}
+
+	outputs := []output{}
 
 	for _, c := range pr.Commits.Nodes[0].Commit.StatusCheckRollup.Contexts.Nodes {
 		mark := ""
@@ -119,19 +128,39 @@ func checksRun(opts *ChecksOptions) error {
 		e := c.CompletedAt.Sub(c.StartedAt)
 		elapsed := e.String()
 		if e < 0 {
-			elapsed = "0"
+			elapsed = "0s"
 		}
 
-		if opts.IO.IsStdoutTTY() {
-			tp.AddField(mark, nil, nil)
-			tp.AddField(c.Name, nil, nil)
-			tp.AddField(elapsed, nil, nil)
-			tp.AddField(c.DetailsURL, nil, nil)
+		outputs = append(outputs, output{mark, bucket, c.Name, elapsed, c.DetailsURL})
+	}
+
+	sort.Slice(outputs, func(i, j int) bool {
+		if outputs[i].bucket == outputs[j].bucket {
+			return outputs[i].name < outputs[j].name
 		} else {
-			tp.AddField(c.Name, nil, nil)
-			tp.AddField(bucket, nil, nil)
-			tp.AddField(elapsed, nil, nil)
-			tp.AddField(c.DetailsURL, nil, nil)
+			if outputs[i].bucket == "fail" {
+				return true
+			} else if outputs[i].bucket == "pending" && outputs[j].bucket == "success" {
+				return true
+			}
+		}
+
+		return false
+	})
+
+	tp := utils.NewTablePrinter(opts.IO)
+
+	for _, o := range outputs {
+		if opts.IO.IsStdoutTTY() {
+			tp.AddField(o.mark, nil, nil)
+			tp.AddField(o.name, nil, nil)
+			tp.AddField(o.elapsed, nil, nil)
+			tp.AddField(o.link, nil, nil)
+		} else {
+			tp.AddField(o.name, nil, nil)
+			tp.AddField(o.bucket, nil, nil)
+			tp.AddField(o.elapsed, nil, nil)
+			tp.AddField(o.link, nil, nil)
 		}
 
 		tp.EndRow()
